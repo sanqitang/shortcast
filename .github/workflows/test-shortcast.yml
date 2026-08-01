@@ -37,6 +37,12 @@ jobs:
           curl -L -o input_video/sample_long_video.mp4 "${{ github.event.inputs.test_video_url }}"
           echo "Downloaded sample video to $(pwd)/input_video/sample_long_video.mp4"
 
+      - name: Free Up macOS Runner Disk Space
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*
+          xcrun simctl erase all || true
+          df -h
+
       - name: Launch Shortcast & Pass Video
         run: |
           INPUT_PATH="$(pwd)/input_video/sample_long_video.mp4"
