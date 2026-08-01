@@ -43,67 +43,70 @@ jobs:
           xcrun simctl erase all || true
           df -h
 
-      - name: Launch Shortcast & Trigger Processing via AppleScript
+      
+      - name: Launch Shortcast & Trigger Video Processing
         run: |
           INPUT_PATH="$(pwd)/input_video/sample_long_video.mp4"
           
-          echo "Launching Shortcast..."
+          echo "1. Launching Shortcast..."
           open -a /Applications/Shortcast.app
-          sleep 10  # Wait for window to load
+          sleep 8  # Wait for main window to render
 
-          echo "Simulating file drop/open in Shortcast via AppleScript..."
+          echo "2. Sending File Open AppleScript sequence..."
           osascript -e "
-            tell application \"Shortcast\"
-              activate
-            end tell
+            tell application \"Shortcast\" to activate
+            delay 2
             tell application \"System Events\"
               tell process \"Shortcast\"
-                -- Open file menu (⌘O) to load the video
+                -- Open file shortcut (⌘O)
                 keystroke \"o\" using {command down}
                 delay 2
                 
-                -- Type file path into open dialog (⌘⇧G in macOS file picker)
+                -- Open 'Go to Folder' drawer in macOS file picker (⌘⇧G)
                 keystroke \"g\" using {command down, shift down}
-                delay 1
+                delay 2
+                
+                -- Type full video path and confirm
                 keystroke \"$INPUT_PATH\"
                 delay 1
-                key code 36 -- Press Enter
-                delay 1
-                key code 36 -- Press Enter to confirm selection
+                key code 36 -- Return / Enter key
+                delay 2
+                key code 36 -- Return / Enter key to confirm Open
               end tell
             end tell
           " || true
 
-          echo "Waiting for AI pipeline (transcribe + LLM moment finding + render)..."
-          # Monitor process or sleep for execution window
-          sleep 360
+          echo "3. Monitoring processing (WhisperKit + Qwen 3.5 9B / Gemma 4)..."
+          # Give adequate time for model download + transcription + cutting
+          sleep 400
 
       - name: Check Shortcast Logs
         if: always()
         run: |
           log show --predicate 'process == "Shortcast"' --last 10m || true
 
-      - name: Locate Rendered Short Videos
+      - name: Gather Rendered Shorts
+        if: always()
         run: |
           mkdir -p ./output_shorts
 
-          echo "Searching App Support & Containers for Shortcast exports..."
+          echo "Searching for generated mp4s across macOS App Sandboxes..."
           
-          # Search Shortcast Sandbox Container
-          find ~/Library/Containers/com.mutonby.Shortcast/ Data/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
+          # Shortcast Sandbox directory
+          find ~/Library/Containers/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
           
-          # Search standard App Support
-          find ~/Library/Application\ Support/Shortcast/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
+          # Standard App Support
+          find ~/Library/Application\ Support/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
           
-          # General fallback search in Movies / Temp
+          # Fallback Movies / Temp paths
           find ~/Movies/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
           find /tmp/ -name "*.mp4" -exec cp {} ./output_shorts/ \; 2>/dev/null || true
 
           ls -lh ./output_shorts/
-      
-      - name: Upload Processed Shorts as Artifacts
+
+      - name: Upload Processed Shorts
         uses: actions/upload-artifact@v4
         with:
-          name: Generated-YouTube-Shorts
+          name: Shortcast-Output
           path: ./output_shorts/*.mp4
           if-no-files-found: warn
