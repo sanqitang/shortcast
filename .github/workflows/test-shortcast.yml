@@ -1,0 +1,70 @@
+name: Test Shortcast Video Processing
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_video_url:
+        description: 'URL of long sample video'
+        required: false
+        default: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
+
+jobs:
+  process-video:
+    name: Process Video & Export Short
+    runs-on: macos-15  # Requires Apple Silicon runner for MLX / Metal acceleration
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download & Install Shortcast DMG
+        run: |
+          echo "Fetching latest Shortcast release URL..."
+          DMG_URL=$(curl -s https://api.github.com/repos/mutonby/shortcast/releases/latest \
+            | jq -r '.assets[] | select(.name | endswith(".dmg")) | .browser_download_url')
+
+          curl -L -o Shortcast.dmg "$DMG_URL"
+          hdiutil attach Shortcast.dmg -mountpoint /Volumes/Shortcast
+          sudo cp -R /Volumes/Shortcast/Shortcast.app /Applications/
+          hdiutil detach /Volumes/Shortcast
+          
+          # Remove Gatekeeper quarantine
+          sudo xattr -dr com.apple.quarantine /Applications/Shortcast.app
+
+      - name: Download Sample Input Video
+        run: |
+          mkdir -p input_video
+          curl -L -o input_video/sample_long_video.mp4 "${{ github.event.inputs.test_video_url }}"
+          echo "Downloaded sample video to $(pwd)/input_video/sample_long_video.mp4"
+
+      - name: Launch Shortcast & Pass Video
+        run: |
+          INPUT_PATH="$(pwd)/input_video/sample_long_video.mp4"
+          echo "Opening $INPUT_PATH with Shortcast..."
+          
+          # Open Shortcast and pass the input video file
+          open -a /Applications/Shortcast.app "$INPUT_PATH"
+          
+          # Allow time for model downloading (Gemma 12B/WhisperKit) and AI processing pass
+          echo "Waiting for Shortcast to initialize models, transcribe, and render shorts..."
+          sleep 300
+
+      - name: Locate Rendered Short Videos
+        id: locate_shorts
+        run: |
+          mkdir -p ./output_shorts
+          
+          echo "Searching for generated .mp4 files in application storage..."
+          # Scan standard macOS container and temp directories where Shortcast exports cut clips
+          find ~/Library/Containers/ -name "*.mp4" 2>/dev/null | xargs -I {} cp {} ./output_shorts/ || true
+          find ~/Movies/ -name "*.mp4" 2>/dev/null | xargs -I {} cp {} ./output_shorts/ || true
+          find /tmp/ -name "*.mp4" 2>/dev/null | xargs -I {} cp {} ./output_shorts/ || true
+
+          ls -lh ./output_shorts/
+
+      - name: Upload Processed Shorts as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Generated-YouTube-Shorts
+          path: ./output_shorts/*.mp4
+          if-no-files-found: warn
